@@ -5,7 +5,7 @@ import (
 )
 
 type MockConnection struct {
-	Id int
+	Id     int
 	Status bool
 }
 
@@ -31,17 +31,15 @@ func (f *MockFactory) CheckConnection(con interface{}) bool {
 	return con.(*MockConnection).Status
 }
 
-
-
 func TestAllocateOne(t *testing.T) {
-	pool := NewPool(2, new(MockFactory))
+	pool := New(2, 3, new(MockFactory))
 	if con, _ := pool.Allocate(); con == nil {
 		t.Error(`Cannot do first allocation`)
 	}
 }
 
 func TestAllocateMoreThanMax(t *testing.T) {
-	pool := NewPool(2, new(MockFactory))
+	pool := New(2, 3, new(MockFactory))
 	pool.Allocate()
 	pool.Allocate()
 	if con, _ := pool.Allocate(); con == nil {
@@ -50,7 +48,7 @@ func TestAllocateMoreThanMax(t *testing.T) {
 }
 
 func TestRelease(t *testing.T) {
-	pool := NewPool(2, new(MockFactory))
+	pool := New(2, 3, new(MockFactory))
 	con, _ := pool.Allocate()
 	if err := pool.Release(con); err != nil {
 		t.Errorf(`Cannot release just allocated connection: %s`, err)
@@ -59,7 +57,7 @@ func TestRelease(t *testing.T) {
 
 func TestReleaseMoreThanAllocated(t *testing.T) {
 	fac := new(MockFactory)
-	pool := NewPool(2, fac)
+	pool := New(2, 3, fac)
 	tmp, _ := pool.Allocate()
 	pool.Release(tmp)
 	con, _ := fac.CreateConnection()
@@ -69,7 +67,7 @@ func TestReleaseMoreThanAllocated(t *testing.T) {
 }
 
 func TestReleaseMoreThanMax(t *testing.T) {
-	pool := NewPool(2, new(MockFactory))
+	pool := New(2, 3, new(MockFactory))
 	var f = func() *MockConnection {
 		tmp, _ := pool.Allocate()
 		return tmp.(*MockConnection)
@@ -88,8 +86,8 @@ func TestReleaseMoreThanMax(t *testing.T) {
 }
 
 func TestReallocateQueuedconnection(t *testing.T) {
-	pool := NewPool(2, new(MockFactory))
-	con, _ := pool.Allocate();
+	pool := New(2, 3, new(MockFactory))
+	con, _ := pool.Allocate()
 	id := con.(*MockConnection).Id
 	pool.Release(con)
 	if con, _ := pool.Allocate(); con.(*MockConnection).Id != id {
@@ -98,27 +96,27 @@ func TestReallocateQueuedconnection(t *testing.T) {
 }
 
 func TestconnectionInterrupted(t *testing.T) {
-	pool := NewPool(2, new(MockFactory))
-	con, _ := pool.Allocate();
+	pool := New(2, 3, new(MockFactory))
+	con, _ := pool.Allocate()
 	con.(*MockConnection).Stop()
 	id := con.(*MockConnection).Id
 	if err := pool.Release(con); err != nil {
 		t.Fatalf(`error in releasing interrupted connection: %s`, err)
 	}
 
-	tmp, _ := pool.Allocate();
+	tmp, _ := pool.Allocate()
 	c := tmp.(*MockConnection)
 	if c.Id == id {
 		t.Error(`pool returned an old, interrupted connection`)
 	}
 
-	if ! c.Status {
+	if !c.Status {
 		t.Error(`pool returned an interrupted connection`)
 	}
 }
 
 func TestMaxIdle(t *testing.T) {
-	pool := NewPool(2, new(MockFactory))
+	pool := New(2, 30, new(MockFactory))
 	var f = func() *MockConnection {
 		tmp, _ := pool.Allocate()
 		return tmp.(*MockConnection)
@@ -144,5 +142,28 @@ func TestMaxIdle(t *testing.T) {
 
 	if counter != 2 {
 		t.Errorf(`expected idle connections is 2, got %d`, counter)
+	}
+}
+
+func TestMaxRun(t *testing.T) {
+	pool := New(2, 2, new(MockFactory))
+	ch := make(chan *MockConnection, 3)
+
+	tmp, _ := pool.Allocate()
+	ch <- tmp.(*MockConnection)
+	tmp, _ = pool.Allocate()
+	ch <- tmp.(*MockConnection)
+
+	go func() {
+		tmp, _ := pool.Allocate()
+		ch <- tmp.(*MockConnection)
+	}()
+
+	for range [3]int{1, 2, 3} {
+		c := <-ch
+		pool.Release(c)
+		if c.Id != 1 && c.Id != 2 {
+			t.Errorf("Expected connecion id is 1 or 2, got %d", c.Id)
+		}
 	}
 }
